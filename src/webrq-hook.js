@@ -1,10 +1,18 @@
 const path = require("path");
 const { resolveCaseInsensitive } = require("./fs-hook.js");
 
+// Certain filename might have some symbols that might confuse decodeURIComponent.
+function safeDecodeURIComponent(str) {
+    return decodeURIComponent(str.replace(
+        /%(?![0-9a-fA-F]{2})/g,
+        '%25'
+    ));
+}
+
 chrome.webRequest.onBeforeRequest.addListener(
     d => {
         const urlObj = new URL(d.url);
-        let relativePath = decodeURIComponent(urlObj.pathname);
+        let relativePath = safeDecodeURIComponent(urlObj.pathname);
 
         // Strip the leading slash so Node treats it as relative to the app root
         if (relativePath.startsWith('/')) {
