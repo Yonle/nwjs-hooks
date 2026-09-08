@@ -2,12 +2,15 @@
 
 Compatibility hooks for [NW.js](https://nwjs.io/) applications.
 
-`nwjs-hooks` provides small runtime hooks intended to improve compatibility of applications whose resource paths or filesystem access assume case-insensitive behavior, such as applications originally developed and tested primarily on Windows.
+`nwjs-hooks` provides small runtime compatibility hooks for applications whose filesystem and resource handling rely on behavior commonly found on Windows or older Node.js/NW.js environments.
 
-The hooks operate at two different layers:
+The hooks currently address:
 
-* Node.js filesystem APIs
-* Chromium/NW.js resource requests
+* Case-insensitive filesystem access
+* Case-insensitive Chromium/NW.js resource requests
+* Legacy `fs.writeFile()` data coercion
+* A Linux fallback for `LOCALAPPDATA`
+* Window resizing behavior for applications with hardcoded canvas dimensions
 
 ## Installation
 
@@ -17,7 +20,7 @@ Download the repository as a ZIP file from GitHub:
 
 Extract the downloaded archive.
 
-Copy the JavaScript hook files into the web directory of your NW.js application.
+Copy the JavaScript files into the web directory of your NW.js application.
 
 For example, if the application has this structure:
 
@@ -46,7 +49,7 @@ my-app/
     └── ...
 ```
 
-Do not place the extracted repository directory itself inside `www/`. Copy the required `.js` files from the repository into the web directory.
+Do not place the extracted repository directory itself inside `www/`. Copy the JavaScript files from the repository into the application's web directory.
 
 The hooks must be loaded before the application itself.
 
@@ -75,16 +78,19 @@ For example:
 </html>
 ```
 
-Loading `hookloader.js` first is important because it installs the hooks before the application begins accessing files and resources.
+Loading `hookloader.js` first is important because it installs the compatibility hooks before the application begins accessing files and resources.
 
 ## Hooks
 
-* **fs-hook:** Hooks selected Node.js `fs` operations and resolves filesystem paths case-insensitively. This allows code requesting paths such as `Languages/` to locate an actual directory named `languages/` on a case-sensitive filesystem.
-* **webrq-hook:** Hooks NW.js/Chromium `chrome.webRequest` resource requests and can redirect `chrome-extension://` resource URLs to the correctly cased path found on disk. This applies to browser-side resources such as images, audio, scripts, and other files loaded through NW.js's resource system.
+* **fs-hook:** Hooks selected Node.js `fs` operations and resolves filesystem paths case-insensitively. It also restores legacy behavior where unsupported `fs.writeFile()` data values were implicitly coerced to strings. This allows older applications to continue using values such as `0` as file data while preserving supported `string`, `Buffer`, `TypedArray`, and `DataView` values.
 
-## Why both hooks are needed
+* **webrq-hook:** Hooks NW.js/Chromium `chrome.webRequest` resource requests and redirects local `chrome-extension://` resource URLs when their requested path differs in capitalization from the file stored on disk. This covers browser-side resources such as images, audio, scripts, and other files loaded through NW.js's resource system.
 
-NW.js applications can access resources through more than one mechanism.
+* **hookloader:** Loads the compatibility hooks and applies additional environment-level compatibility behavior before the application starts. It enables window resizing and provides a Linux fallback for `LOCALAPPDATA` when the variable is not already defined.
+
+## Why both filesystem and resource hooks are needed
+
+NW.js applications can access resources through different layers.
 
 A JavaScript plugin may directly use Node.js:
 
@@ -92,13 +98,13 @@ A JavaScript plugin may directly use Node.js:
 require("fs").readdirSync("Languages");
 ```
 
-while normal HTML5 resources may be loaded by Chromium:
+while normal HTML5 resources may be requested through Chromium:
 
 ```js
 image.src = "img/pictures/Embers.png";
 ```
 
-These two operations are handled by different layers.
+These operations do not use the same resource path.
 
 On a case-sensitive filesystem:
 
@@ -114,13 +120,13 @@ Languages/
 embers.png
 ```
 
-`fs-hook.js` addresses Node.js filesystem access, while `webrq-hook.js` addresses browser resource requests.
+`fs-hook.js` handles Node.js filesystem access, while `webrq-hook.js` handles Chromium resource requests.
 
 ## Case-insensitive resolution
 
 The filesystem hook performs a case-insensitive lookup when an exact path does not exist.
 
-For example, an application requesting:
+For example:
 
 ```text
 www/Languages/
@@ -132,7 +138,7 @@ can resolve to:
 www/languages/
 ```
 
-Likewise, a browser request such as:
+Similarly, a Chromium request such as:
 
 ```text
 chrome-extension://<application-id>/www/img/pictures/Embers.png
@@ -140,34 +146,98 @@ chrome-extension://<application-id>/www/img/pictures/Embers.png
 
 can be redirected when the actual file on disk uses different capitalization.
 
+The hooks do not rename files or modify the filesystem. They resolve the existing path at runtime.
+
+## Legacy `fs.writeFile()` compatibility
+
+Older Node.js versions accepted a wider range of values for the `data` argument of `fs.writeFile()` and could implicitly coerce unsupported values to strings.
+
+Newer Node.js versions reject unsupported data types.
+
+For example, older application code may contain:
+
+```js
+fs.writeFile(file, 0, callback);
+```
+
+The `fs-hook` compatibility layer converts unsupported values such as `0` to their string representation while leaving supported types unchanged.
+
+Supported values such as these are not converted:
+
+```js
+"hello"
+Buffer.from("hello")
+new Uint8Array(...)
+new DataView(...)
+```
+
+This behavior is intended for compatibility with applications written for older Node.js environments.
+
+## `LOCALAPPDATA` fallback
+
+Some Windows-oriented applications expect the `LOCALAPPDATA` environment variable to exist.
+
+When running on Linux, `hookloader.js` provides a fallback when `LOCALAPPDATA` is not already defined.
+
+The fallback uses:
+
+```text
+$XDG_DATA_HOME
+```
+
+when available, otherwise:
+
+```text
+~/.local/share
+```
+
+An existing `LOCALAPPDATA` value is preserved.
+
+## Window resizing
+
+`hookloader.js` also explicitly enables NW.js window resizing:
+
+```js
+nw.Window.get().setResizable(true);
+```
+
+This can help applications that implement their own resolution handling or have canvas dimensions tied directly to the window size.
+
+Enabling the NW.js `resizable` manifest option alone may not be sufficient for some applications.
+
 ## Scope
 
-`nwjs-hooks` is intended as a compatibility layer for existing NW.js applications. It does not modify the application's source files or require resources to be renamed.
+`nwjs-hooks` is intended as a compatibility layer for existing NW.js applications.
 
-It is particularly useful for applications containing inconsistent filename capitalization between their code and packaged resources.
+It does not modify the application's source code and does not require application resources to be renamed.
 
-The hooks do not make the underlying filesystem case-insensitive. They only alter how selected application requests are resolved.
+The hooks are especially useful for applications that were developed with assumptions about:
+
+* case-insensitive filesystems
+* older Node.js behavior
+* Windows-specific environment variables
+* NW.js window behavior
 
 ## Limitations
 
-Case-insensitive filesystems can technically contain names that differ only by case:
+Case-insensitive lookup cannot perfectly reproduce a filesystem where two files differ only by case:
 
 ```text
 Foo.png
 foo.png
 ```
 
-A case-insensitive lookup cannot distinguish these names. The resolver therefore cannot reproduce the behavior of a genuinely case-sensitive filesystem in this situation.
+There is no unambiguous case-insensitive match for such a path.
 
-Applications may also use APIs or resource mechanisms that are outside the hooks' coverage.
+Applications may also use APIs or resource mechanisms that are not covered by the hooks.
 
-For this reason, the hooks should be considered a compatibility mechanism rather than a complete filesystem emulation layer.
+For this reason, `nwjs-hooks` should be considered a compatibility layer rather than a complete emulation of Windows filesystem or runtime behavior.
 
 ## Compatibility
 
-This project is designed for NW.js applications with Node.js integration and access to Chromium's `chrome.webRequest` API.
+`nwjs-hooks` is designed for NW.js applications with Node.js integration and access to Chromium's `chrome.webRequest` API.
 
-Behavior may vary between NW.js versions because NW.js bundles its own Chromium and Node.js versions.
+Behavior may vary between NW.js versions because NW.js bundles specific versions of Chromium and Node.js.
 
 ## License
 
