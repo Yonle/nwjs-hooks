@@ -82,7 +82,7 @@ Loading `hookloader.js` first is important because it installs the compatibility
 
 ## Hooks
 
-* **fs-hook:** Hooks selected Node.js `fs` operations and resolves filesystem paths case-insensitively. It also restores legacy behavior where unsupported `fs.writeFile()` data values were implicitly coerced to strings. This allows older applications to continue using values such as `0` as file data while preserving supported `string`, `Buffer`, `TypedArray`, and `DataView` values.
+* **fs-hook:** Hooks selected Node.js `fs` operations and resolves filesystem paths case-insensitively. It covers both synchronous and asynchronous filesystem APIs, including common operations for reading, writing, creating, removing, renaming, copying, linking, and accessing files. It also restores legacy behavior where unsupported `fs.writeFile()` data values were implicitly coerced to strings.
 
 * **webrq-hook:** Hooks NW.js/Chromium `chrome.webRequest` resource requests and redirects local `chrome-extension://` resource URLs when their requested path differs in capitalization from the file stored on disk. This covers browser-side resources such as images, audio, scripts, and other files loaded through NW.js's resource system.
 
@@ -160,7 +160,7 @@ For example, older application code may contain:
 fs.writeFile(file, 0, callback);
 ```
 
-The `fs-hook` compatibility layer converts unsupported values such as `0` to their string representation while leaving supported types unchanged.
+The `fs-hook` compatibility layer converts unsupported values to their string representation while leaving supported values unchanged.
 
 Supported values such as these are not converted:
 
@@ -171,7 +171,7 @@ new Uint8Array(...)
 new DataView(...)
 ```
 
-This behavior is intended for compatibility with applications written for older Node.js environments.
+This behavior is intended for applications that were written against older Node.js behavior.
 
 ## `LOCALAPPDATA` fallback
 
@@ -203,7 +203,7 @@ nw.Window.get().setResizable(true);
 
 This can help applications that implement their own resolution handling or have canvas dimensions tied directly to the window size.
 
-Enabling the NW.js `resizable` manifest option alone may not be sufficient for some applications.
+For some applications, enabling the NW.js `resizable` manifest option alone may not be sufficient.
 
 ## Scope
 
@@ -214,7 +214,7 @@ It does not modify the application's source code and does not require applicatio
 The hooks are especially useful for applications that were developed with assumptions about:
 
 * case-insensitive filesystems
-* older Node.js behavior
+* older Node.js filesystem behavior
 * Windows-specific environment variables
 * NW.js window behavior
 
@@ -227,11 +227,13 @@ Foo.png
 foo.png
 ```
 
-There is no unambiguous case-insensitive match for such a path.
+There is no unambiguous case-insensitive match for such a path. The resolver will use the first matching entry it encounters.
 
 Applications may also use APIs or resource mechanisms that are not covered by the hooks.
 
-For this reason, `nwjs-hooks` should be considered a compatibility layer rather than a complete emulation of Windows filesystem or runtime behavior.
+The filesystem hook only operates on the APIs it explicitly wraps. File descriptor-based operations, for example, do not perform path resolution because they operate on already-open file descriptors rather than filesystem paths.
+
+For these reasons, `nwjs-hooks` should be considered a compatibility layer rather than a complete emulation of Windows filesystem or runtime behavior.
 
 ## Compatibility
 
