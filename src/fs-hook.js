@@ -9,6 +9,8 @@ const original = {
     readdirSync: fs.readdirSync,
     readFileSync: fs.readFileSync,
     openSync: fs.openSync,
+    writeFile: fs.writeFile,
+    writeFileSync: fs.writeFileSync,
 };
 
 const cache = new Map();
@@ -65,8 +67,30 @@ function hook(name) {
     const fn = original[name];
 
     fs[name] = function (...args) {
-        if (typeof args[0] === "string") {
+        // Path-based APIs.
+        if (
+            typeof args[0] === "string" &&
+            name !== "writeFile" &&
+            name !== "writeFileSync"
+        ) {
             args[0] = resolveCaseInsensitive(args[0]);
+        }
+
+        // Old Node behavior: coerce unsupported write data to string.
+        if (name === "writeFile" || name === "writeFileSync") {
+            if (
+                typeof args[0] === "string"
+            ) {
+                args[0] = resolveCaseInsensitive(args[0]);
+            }
+
+            if (
+                typeof args[1] !== "string" &&
+                !Buffer.isBuffer(args[1]) &&
+                !ArrayBuffer.isView(args[1])
+            ) {
+                args[1] = String(args[1]);
+            }
         }
 
         return fn.apply(this, args);
